@@ -1,0 +1,126 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+        targets: aarch64-apple-darwin, x86_64-apple-darwin
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache target directory
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Run tests
+      run: cargo test --verbose
+
+    - name: Test build for Apple Silicon
+      run: cargo build --release --target aarch64-apple-darwin
+
+    - name: Test build for Intel
+      run: cargo build --release --target x86_64-apple-darwin
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions-rs/audit-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build Release
+    runs-on: macos-latest
+    needs: [test, security]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-apple-darwin, x86_64-apple-darwin
+    
+    - name: Build for Apple Silicon
+      run: cargo build --release --target aarch64-apple-darwin
+    
+    - name: Build for Intel
+      run: cargo build --release --target x86_64-apple-darwin
+    
+    - name: Create universal binary
+      run: |
+        lipo -create \
+          target/x86_64-apple-darwin/release/commandgpt \
+          target/aarch64-apple-darwin/release/commandgpt \
+          -output commandgpt-universal
+    
+    - name: Create release archive
+      run: |
+        mkdir -p release
+        cp commandgpt-universal release/commandgpt
+        cp README.md LICENSE-MIT LICENSE-APACHE release/
+        tar -czf commandgpt-${{ github.ref_name }}-macos.tar.gz -C release .
+    
+    - name: Upload release artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: commandgpt-${{ github.ref_name }}-macos
+        path: commandgpt-${{ github.ref_name }}-macos.tar.gz
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: commandgpt-${{ github.ref_name }}-macos
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: commandgpt-${{ github.ref_name }}-macos.tar.gz
+        draft: false
+        prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
