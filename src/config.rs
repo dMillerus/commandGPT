@@ -258,6 +258,9 @@ mod tests {
 
     #[test]
     fn test_config_load() {
+        // Ensure no environment override affects this test
+        std::env::remove_var("COMMANDGPT_MODEL");
+        
         // Test loading default config when no config file exists
         let config = AppConfig::load().unwrap();
         assert_eq!(config.openai_model, "gpt-3.5-turbo");
@@ -282,6 +285,9 @@ mod tests {
 
     #[test]
     fn test_environment_variable_override() {
+        // Clean up first to ensure test isolation
+        std::env::remove_var("COMMANDGPT_MODEL");
+        
         // Set environment variable
         std::env::set_var("COMMANDGPT_MODEL", "gpt-4");
         

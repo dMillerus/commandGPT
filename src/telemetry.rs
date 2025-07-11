@@ -193,11 +193,28 @@ impl TelemetryCollector {
         let mut cleaned = command.to_string();
         
         // Remove potential secrets (API keys, passwords, etc.)
-        // This is a simple heuristic - in practice, you'd want more sophisticated detection
         let secret_patterns = vec![
-            regex::Regex::new(r"[A-Za-z0-9_\-]{20,}").unwrap(), // Long alphanumeric strings
-            regex::Regex::new(r"sk-[A-Za-z0-9]{48}").unwrap(),   // OpenAI API keys
-            regex::Regex::new(r"[A-Za-z0-9+/]{40,}={0,2}").unwrap(), // Base64 strings
+            // Environment variables with secrets (broader pattern)
+            regex::Regex::new(r"([A-Z_]*(?:KEY|SECRET|PASSWORD|TOKEN)[^=]*=[^\s]+)").unwrap(),
+            // MySQL passwords: -p'password' or -ppassword or --password=password
+            regex::Regex::new(r"-p['\x22]?[^'\x22\s]+['\x22]?").unwrap(),
+            regex::Regex::new(r"--password=[^\s]+").unwrap(),
+            // SSH key patterns: -i path_to_key
+            regex::Regex::new(r"-i\s+[^\s]*(?:secret|private|rsa)[^\s]*").unwrap(),
+            // Sudo with password pipe
+            regex::Regex::new(r"echo\s+['\x22][^'\x22]*['\x22][^|]*\|\s*sudo\s+-S").unwrap(),
+            // curl with basic auth
+            regex::Regex::new(r"-u\s+[^:\s]+:[^\s]+").unwrap(),
+            // docker login with password
+            regex::Regex::new(r"docker\s+login[^-]*-p\s+[^\s]+").unwrap(),
+            // git clone with credentials in URL
+            regex::Regex::new(r"https://[^:]+:[^@]+@").unwrap(),
+            // OpenAI API keys
+            regex::Regex::new(r"sk-[A-Za-z0-9]{48}").unwrap(),
+            // Long alphanumeric strings (potential API keys) - but only if longer than 32 chars
+            regex::Regex::new(r"\b[A-Za-z0-9_\-]{32,}\b").unwrap(),
+            // Base64 strings
+            regex::Regex::new(r"[A-Za-z0-9+/]{40,}={0,2}").unwrap(),
         ];
 
         for pattern in secret_patterns {
@@ -239,10 +256,16 @@ fn get_telemetry() -> &'static mut TelemetryCollector {
 // Public API functions
 pub fn enable_telemetry() {
     get_telemetry().enable();
+    if let Err(e) = save_telemetry_preference(true) {
+        log::warn!("Failed to save telemetry preference: {}", e);
+    }
 }
 
 pub fn disable_telemetry() {
     get_telemetry().disable();
+    if let Err(e) = save_telemetry_preference(false) {
+        log::warn!("Failed to save telemetry preference: {}", e);
+    }
 }
 
 pub fn is_telemetry_enabled() -> bool {
