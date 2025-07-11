@@ -304,6 +304,7 @@ pub fn save_telemetry_preference(enabled: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_command_cleaning() {
@@ -319,6 +320,22 @@ mod tests {
         let normal_cmd = "ls -la";
         let cleaned_normal = collector.clean_command_for_telemetry(normal_cmd);
         assert_eq!(cleaned_normal, normal_cmd);
+
+        // Test password redaction
+        let cmd_with_pass = "mysql -u user -p'secretpassword' database";
+        let cleaned_pass = collector.clean_command_for_telemetry(cmd_with_pass);
+        assert!(cleaned_pass.contains("[REDACTED]"));
+        assert!(!cleaned_pass.contains("secretpassword"));
+
+        // Test SSH key redaction
+        let cmd_with_ssh = "ssh -i ~/.ssh/id_rsa_secret user@host";
+        let cleaned_ssh = collector.clean_command_for_telemetry(cmd_with_ssh);
+        assert!(cleaned_ssh.contains("[REDACTED]"));
+
+        // Test environment variable redaction
+        let cmd_with_env = "export SECRET_KEY=abc123 && run_app";
+        let cleaned_env = collector.clean_command_for_telemetry(cmd_with_env);
+        assert!(cleaned_env.contains("[REDACTED]"));
     }
 
     #[test]
@@ -331,6 +348,11 @@ mod tests {
         
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, collector.hash_string("different command"));
+        
+        // Hash should be consistent across different collector instances
+        let collector2 = TelemetryCollector::new();
+        let hash3 = collector2.hash_string(input);
+        assert_eq!(hash1, hash3);
     }
 
     #[test]
@@ -341,5 +363,112 @@ mod tests {
         collector.record_command_execution("ls -la", true, Duration::from_millis(100));
         assert_eq!(collector.events.len(), 1);
         assert_eq!(collector.events[0].event_type, "command_execution");
+        
+        collector.record_command_execution("ls -la", false, Duration::from_millis(50));
+        assert_eq!(collector.events.len(), 2);
+        assert_eq!(collector.events[1].event_type, "command_execution");
+        
+        collector.record_error("test_error_type", "test error message");
+        assert_eq!(collector.events.len(), 3);
+        assert_eq!(collector.events[2].event_type, "error");
+    }
+
+    #[test]
+    fn test_telemetry_disabled() {
+        let mut collector = TelemetryCollector::new();
+        // Telemetry is disabled by default
+        
+        collector.record_command_execution("ls -la", true, Duration::from_millis(100));
+        assert_eq!(collector.events.len(), 0); // No events should be recorded
+        
+        collector.enable();
+        collector.record_command_execution("ls -la", true, Duration::from_millis(100));
+        assert_eq!(collector.events.len(), 1); // Now events should be recorded
+    }
+
+    #[test]
+    fn test_telemetry_file_operations() {
+        let temp_dir = TempDir::new().unwrap();
+        let temp_home = temp_dir.path();
+        
+        // Mock home directory
+        std::env::set_var("HOME", temp_home);
+        
+        // Test enabling telemetry
+        enable_telemetry();
+        
+        let telemetry_file = temp_home.join(".commandgpt").join("telemetry.txt");
+        assert!(telemetry_file.exists());
+        
+        let content = std::fs::read_to_string(&telemetry_file).unwrap();
+        assert_eq!(content, "enabled");
+        
+        // Test disabling telemetry
+        disable_telemetry();
+        
+        let content = std::fs::read_to_string(&telemetry_file).unwrap();
+        assert_eq!(content, "disabled");
+        
+        // Clean up
+        std::env::remove_var("HOME");
+    }
+
+    #[test]
+    fn test_event_serialization() {
+        let event = TelemetryEvent {
+            timestamp: chrono::Utc::now(),
+            event_type: "test".to_string(),
+            properties: serde_json::json!({"message": "test data"}),
+        };
+        
+        // Test that events can be serialized to JSON
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("test"));
+        assert!(json.contains("test data"));
+        
+        // Test deserialization
+        let deserialized: TelemetryEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.event_type, "test");
+        assert_eq!(deserialized.properties["message"], "test data");
+    }
+
+    #[test]
+    fn test_batch_operations() {
+        let mut collector = TelemetryCollector::new();
+        collector.enable();
+        
+        // Record multiple events
+        for i in 0..10 {
+            collector.record_command_execution(&format!("command_{}", i), true, Duration::from_millis(100));
+        }
+        
+        assert_eq!(collector.events.len(), 10);
+        
+        // Test clearing events
+        collector.events.clear();
+        assert_eq!(collector.events.len(), 0);
+    }
+
+    #[test]
+    fn test_command_patterns() {
+        let collector = TelemetryCollector::new();
+        
+        // Test various command patterns that should be cleaned
+        let test_cases = vec![
+            ("export AWS_SECRET_ACCESS_KEY=abcd1234", "[REDACTED]"),
+            ("echo 'password123' | sudo -S command", "[REDACTED]"),
+            ("curl -u user:pass123 http://api.com", "[REDACTED]"),
+            ("docker login -p mypassword", "[REDACTED]"),
+            ("git clone https://user:token@github.com/repo.git", "[REDACTED]"),
+        ];
+        
+        for (input, expected_pattern) in test_cases {
+            let cleaned = collector.clean_command_for_telemetry(input);
+            assert!(
+                cleaned.contains(expected_pattern),
+                "Command '{}' should contain '{}' after cleaning, got: '{}'",
+                input, expected_pattern, cleaned
+            );
+        }
     }
 }

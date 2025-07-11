@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::fs;
+use std::path::{Path, PathBuf};
 use tokio::fs as async_fs;
 
 use crate::config::AppConfig;
@@ -83,33 +84,51 @@ impl ContextBuilder {
             return Ok(context_content);
         }
 
-        let mut entries = async_fs::read_dir(&self.config.context_dir).await
-            .context("Failed to read context directory")?;
-
-        let mut files = Vec::new();
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("md") {
-                files.push(path);
-            }
-        }
+        let files = self.collect_context_files(&self.config.context_dir).await?;
 
         // Sort files for consistent ordering
-        files.sort();
+        let mut sorted_files = files;
+        sorted_files.sort();
 
-        for file_path in files {
+        for file_path in sorted_files {
             if let Ok(content) = async_fs::read_to_string(&file_path).await {
                 let filename = file_path.file_name()
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown");
                 
                 context_content.push_str(&format!("### {} content:\n", filename));
-                context_content.push_str(&content);
+                // Truncate large files to prevent context overflow
+                let truncated_content = self.truncate_output(&content, 2048);
+                context_content.push_str(&truncated_content);
                 context_content.push_str("\n\n");
             }
         }
 
         Ok(context_content)
+    }
+
+    async fn collect_context_files(&self, dir: &Path) -> Result<Vec<PathBuf>> {
+        let mut files = Vec::new();
+        
+        let mut entries = async_fs::read_dir(dir).await
+            .context("Failed to read context directory")?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_dir() {
+                // Recursively collect files from subdirectories using Box::pin
+                let subfiles_future = Box::pin(self.collect_context_files(&path));
+                let mut subfiles = subfiles_future.await?;
+                files.append(&mut subfiles);
+            } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                // Include both .md and .markdown files
+                if ext == "md" || ext == "markdown" {
+                    files.push(path);
+                }
+            }
+        }
+
+        Ok(files)
     }
 
     fn build_environment_context(&self) -> String {
@@ -180,7 +199,7 @@ impl ContextBuilder {
             .context("Failed to create context directory")?;
 
         // Create a sample context file
-        let sample_context = r#"# Development Environment
+        let sample_context = r#"# CommandGPT Context
 
 This is a sample context file. You can add information about:
 
@@ -191,6 +210,16 @@ This is a sample context file. You can add information about:
 - Common tasks and procedures
 
 The assistant will include this context when generating commands.
+
+## System Information
+- Operating System: macOS
+- Shell: zsh
+- Package Manager: Homebrew
+
+## Preferences
+- Editor: VS Code
+- Version Control: Git
+- Containerization: Docker
 
 ## Common Tools
 - Homebrew for package management
@@ -218,6 +247,7 @@ The assistant will include this context when generating commands.
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use std::fs;
 
     #[tokio::test]
     async fn test_build_environment_context() {
@@ -228,6 +258,8 @@ mod tests {
         assert!(context.contains("Current Environment"));
         assert!(context.contains("macOS"));
         assert!(context.contains("Apple Silicon"));
+        assert!(context.contains("Shell:"));
+        assert!(context.contains("Working Directory:"));
     }
 
     #[tokio::test]
@@ -242,5 +274,171 @@ mod tests {
         let truncated = builder.truncate_output(&long_output, 50);
         assert!(truncated.len() <= 50 + 15); // 15 for "... (truncated)"
         assert!(truncated.ends_with("... (truncated)"));
+        
+        // Test empty output
+        assert_eq!(builder.truncate_output("", 100), "");
+        
+        // Test exact limit
+        let exact_limit = "a".repeat(50);
+        assert_eq!(builder.truncate_output(&exact_limit, 50), exact_limit);
+    }
+
+    #[tokio::test]
+    async fn test_build_context() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = AppConfig::default();
+        config.context_dir = temp_dir.path().join("context");
+        fs::create_dir_all(&config.context_dir).unwrap();
+        
+        // Create test context files
+        let test_file1 = config.context_dir.join("test1.md");
+        fs::write(&test_file1, "# Test Context 1\nThis is test content 1").unwrap();
+        
+        let test_file2 = config.context_dir.join("test2.md");
+        fs::write(&test_file2, "# Test Context 2\nThis is test content 2").unwrap();
+        
+        // Create non-markdown file (should be ignored)
+        let non_md_file = config.context_dir.join("test.txt");
+        fs::write(&non_md_file, "This should be ignored").unwrap();
+        
+        let builder = ContextBuilder::new(&config);
+        let context = builder.build_system_message().await.unwrap();
+        
+        assert!(context.contains("Current Environment"));
+        assert!(context.contains("Test Context 1"));
+        assert!(context.contains("Test Context 2"));
+        assert!(context.contains("test content 1"));
+        assert!(context.contains("test content 2"));
+        assert!(!context.contains("This should be ignored"));
+    }
+
+    #[tokio::test]
+    async fn test_load_context_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_dir = temp_dir.path().join("context");
+        fs::create_dir_all(&context_dir).unwrap();
+        
+        // Create test files
+        let file1 = context_dir.join("file1.md");
+        fs::write(&file1, "Content 1").unwrap();
+        
+        let file2 = context_dir.join("file2.md");
+        fs::write(&file2, "Content 2").unwrap();
+        
+        // Create subdirectory with file
+        let subdir = context_dir.join("subdir");
+        fs::create_dir_all(&subdir).unwrap();
+        let subfile = subdir.join("subfile.md");
+        fs::write(&subfile, "Sub content").unwrap();
+        
+        let mut config = AppConfig::default();
+        config.context_dir = context_dir;
+        let builder = ContextBuilder::new(&config);
+        
+        let content = builder.load_context_files().await.unwrap();
+        assert!(content.contains("Content 1"));
+        assert!(content.contains("Content 2"));
+        assert!(content.contains("Sub content"));
+    }
+
+    #[tokio::test]
+    async fn test_load_context_files_empty_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_dir = temp_dir.path().join("context");
+        fs::create_dir_all(&context_dir).unwrap();
+        
+        let mut config = AppConfig::default();
+        config.context_dir = context_dir;
+        let builder = ContextBuilder::new(&config);
+        
+        let content = builder.load_context_files().await.unwrap();
+        assert!(content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_load_context_files_nonexistent_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_dir = temp_dir.path().join("nonexistent");
+        
+        let mut config = AppConfig::default();
+        config.context_dir = context_dir;
+        let builder = ContextBuilder::new(&config);
+        
+        let content = builder.load_context_files().await.unwrap();
+        assert!(content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_default_context() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = AppConfig::default();
+        config.context_dir = temp_dir.path().join("context");
+        
+        let builder = ContextBuilder::new(&config);
+        assert!(builder.create_default_context_files().await.is_ok());
+        
+        assert!(config.context_dir.exists());
+        let sample_file = config.context_dir.join("sample.md");
+        assert!(sample_file.exists());
+        
+        let content = fs::read_to_string(&sample_file).unwrap();
+        assert!(content.contains("# CommandGPT Context"));
+        assert!(content.contains("## System Information"));
+        assert!(content.contains("## Preferences"));
+    }
+
+    #[tokio::test]
+    async fn test_file_filtering() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_dir = temp_dir.path().join("context");
+        fs::create_dir_all(&context_dir).unwrap();
+        
+        // Create various file types
+        fs::write(context_dir.join("valid.md"), "Valid markdown").unwrap();
+        fs::write(context_dir.join("also_valid.markdown"), "Also valid").unwrap();
+        fs::write(context_dir.join("invalid.txt"), "Invalid text").unwrap();
+        fs::write(context_dir.join("invalid.json"), "{}").unwrap();
+        fs::write(context_dir.join(".hidden.md"), "Hidden markdown").unwrap();
+        
+        let mut config = AppConfig::default();
+        config.context_dir = context_dir;
+        let builder = ContextBuilder::new(&config);
+        
+        let content = builder.load_context_files().await.unwrap();
+        assert!(content.contains("Valid markdown"));
+        assert!(content.contains("Also valid"));
+        assert!(content.contains("Hidden markdown")); // Hidden files should be included
+        assert!(!content.contains("Invalid text"));
+        assert!(!content.contains("{}"));
+    }
+
+    #[tokio::test]
+    async fn test_large_file_handling() {
+        let temp_dir = TempDir::new().unwrap();
+        let context_dir = temp_dir.path().join("context");
+        fs::create_dir_all(&context_dir).unwrap();
+        
+        // Create a large file
+        let large_content = "Large content line\n".repeat(1000);
+        let large_file = context_dir.join("large.md");
+        fs::write(&large_file, &large_content).unwrap();
+        
+        let mut config = AppConfig::default();
+        config.context_dir = context_dir;
+        let builder = ContextBuilder::new(&config);
+        
+        let content = builder.load_context_files().await.unwrap();
+        // Should be truncated
+        assert!(content.len() < large_content.len());
+        assert!(content.contains("Large content line"));
+    }
+
+    #[test]
+    fn test_context_builder_new() {
+        let config = AppConfig::default();
+        let builder = ContextBuilder::new(&config);
+        
+        // Verify the builder is created with the correct config
+        assert_eq!(builder.config.context_dir, config.context_dir);
     }
 }

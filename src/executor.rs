@@ -206,6 +206,7 @@ impl CommandExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio_test;
 
     #[tokio::test]
     async fn test_simple_command() {
@@ -215,6 +216,7 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.stdout.trim(), "hello world");
         assert!(result.stderr.is_empty());
+        assert!(result.duration.as_millis() > 0);
     }
 
     #[tokio::test]
@@ -224,6 +226,8 @@ mod tests {
         
         assert!(!result.success);
         assert!(!result.stderr.is_empty());
+        assert!(result.exit_code.is_some());
+        assert_ne!(result.exit_code.unwrap(), 0);
     }
 
     #[tokio::test]
@@ -249,6 +253,7 @@ echo "Done"
         
         // Test existing command
         assert!(executor.test_command_exists("ls").await);
+        assert!(executor.test_command_exists("echo").await);
         
         // Test non-existing command
         assert!(!executor.test_command_exists("nonexistentcommand12345").await);
@@ -260,9 +265,12 @@ echo "Done"
         
         // Valid syntax
         assert!(executor.validate_syntax("ls -la").await.unwrap());
+        assert!(executor.validate_syntax("echo 'hello world'").await.unwrap());
+        assert!(executor.validate_syntax("cat file.txt | grep pattern").await.unwrap());
         
         // Invalid syntax
         assert!(!executor.validate_syntax("ls -la |").await.unwrap());
+        assert!(!executor.validate_syntax("echo 'unclosed quote").await.unwrap());
     }
 
     #[tokio::test]
@@ -272,5 +280,76 @@ echo "Done"
         
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn test_empty_command() {
+        let executor = CommandExecutor::new();
+        let result = executor.execute("").await.unwrap();
+        
+        // Empty command should succeed but do nothing
+        assert!(result.success);
+        assert!(result.stdout.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_command_with_arguments() {
+        let executor = CommandExecutor::new();
+        let result = executor.execute("echo -n 'no newline'").await.unwrap();
+        
+        assert!(result.success);
+        assert_eq!(result.stdout, "no newline");
+        assert!(!result.stdout.contains('\n'));
+    }
+
+    #[tokio::test]
+    async fn test_command_with_pipes() {
+        let executor = CommandExecutor::new();
+        let result = executor.execute("echo 'hello world' | grep 'world'").await.unwrap();
+        
+        assert!(result.success);
+        assert!(result.stdout.contains("world"));
+    }
+
+    #[tokio::test]
+    async fn test_command_with_redirection() {
+        let executor = CommandExecutor::new();
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        let file_path = temp_file.path().to_str().unwrap();
+        
+        let cmd = format!("echo 'test content' > {}", file_path);
+        let result = executor.execute(&cmd).await.unwrap();
+        
+        assert!(result.success);
+        
+        // Verify file was written
+        let content = std::fs::read_to_string(file_path).unwrap();
+        assert_eq!(content.trim(), "test content");
+    }
+
+    #[tokio::test]
+    async fn test_script_execution() {
+        let executor = CommandExecutor::new();
+        let script = r#"
+#!/bin/bash
+VAR="test"
+echo "Variable: $VAR"
+exit 0
+"#;
+        
+        let result = executor.execute(script).await.unwrap();
+        
+        assert!(result.success);
+        assert!(result.stdout.contains("Variable: test"));
+        assert_eq!(result.exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_command_with_special_characters() {
+        let executor = CommandExecutor::new();
+        let result = executor.execute("echo 'special chars: !@#$%^&*()'").await.unwrap();
+        
+        assert!(result.success);
+        assert!(result.stdout.contains("special chars: !@#$%^&*()"));
     }
 }
