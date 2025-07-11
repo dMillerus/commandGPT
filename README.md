@@ -12,6 +12,15 @@ A single-binary, Rust-based CLI that turns natural-language requests into vetted
 - 📝 **Context-aware** - remembers previous commands and custom context
 - 🔍 **Command history** with search and statistics
 - ⚡ **Fast execution** with async I/O and HTTP/2 keep-alive
+- 🪝 **Shell hooks** - automatic command suggestions for typos and unknown commands
+
+## Documentation
+
+For complete documentation, see the manual page:
+
+```bash
+man commandgpt
+```
 
 ## Installation
 
@@ -95,6 +104,50 @@ commandgpt config delete-key
 
 # Show current configuration
 commandgpt config show
+```
+
+### Shell Hook (Auto-Fallback)
+
+CommandGPT can automatically intercept unknown commands and suggest alternatives:
+
+```bash
+# Install shell hook
+commandgpt shell-hook install
+
+# Enable auto-fallback
+commandgpt shell-hook enable
+
+# Check status
+commandgpt shell-hook status
+```
+
+Example usage with shell hook enabled:
+```bash
+$ lss
+🤖 Command 'lss' not found. Asking CommandGPT for help...
+💡 Suggested command:
+  ls -la
+Execute this command? [y/N]: y
+
+$ find large files
+🤖 Command 'find large files' not found. Asking CommandGPT for help...
+💡 Suggested command:
+  find . -type f -size +100M -exec ls -lh {} +
+Execute this command? [y/N]: y
+```
+
+**Safety Features:**
+- 🔒 Disabled by default for security
+- 🛡️ Filters out dangerous commands (`sudo`, `rm`, etc.)
+- ⏱️ 10-second timeout to prevent hanging
+- ✋ Always requires confirmation before execution
+
+**Management Commands:**
+```bash
+commandgpt shell-hook enable     # Enable hook
+commandgpt shell-hook disable    # Disable hook  
+commandgpt shell-hook uninstall  # Remove hook completely
+commandgpt shell-hook generate   # Show hook script
 ```
 
 ### Command Line Options

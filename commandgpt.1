@@ -1,0 +1,484 @@
+.TH COMMANDGPT 1 "July 2025" "CommandGPT 1.0.0" "User Commands"
+.SH NAME
+commandgpt \- AI-powered command line assistant with intelligent shell hooks
+.SH SYNOPSIS
+.B commandgpt
+[\fIOPTION\fR]... [\fICOMMAND\fR]
+.br
+.B commandgpt
+\fBhook\fR \fICOMMAND\fR [\fIARGS\fR]...
+.br
+.B commandgpt
+\fBconfig\fR [\fIKEY\fR] [\fIVALUE\fR]
+.br
+.B commandgpt
+\fBhistory\fR [\fISUBCOMMAND\fR]
+.SH DESCRIPTION
+.B CommandGPT
+is an AI-powered command line assistant that helps users discover, understand, and execute shell commands. It integrates with OpenAI's GPT models to provide intelligent command suggestions, explanations, and automatic typo correction through shell hooks.
+
+The tool operates in multiple modes: interactive REPL mode for conversational command assistance, shell hook mode for automatic command suggestion when typing unknown commands, and various utility modes for configuration and history management.
+
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Display help information and exit.
+.TP
+.BR \-V ", " \-\-version
+Display version information and exit.
+.TP
+.BR \-v ", " \-\-verbose
+Enable verbose output for debugging and detailed information.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress non-essential output.
+.TP
+.BR \-c ", " \-\-config " " \fIFILE\fR
+Use specified configuration file instead of default location.
+.TP
+.BR \-\-api\-key " " \fIKEY\fR
+Override OpenAI API key for this session.
+.TP
+.BR \-\-model " " \fIMODEL\fR
+Specify OpenAI model to use (default: gpt-3.5-turbo).
+.TP
+.BR \-\-max\-tokens " " \fINUMBER\fR
+Set maximum tokens for API responses (default: 1000).
+.TP
+.BR \-\-temperature " " \fIVALUE\fR
+Set AI creativity level from 0.0 to 1.0 (default: 0.7).
+
+.SH COMMANDS
+.TP
+.B hook \fICOMMAND\fR [\fIARGS\fR]... [\fIOPTIONS\fR]
+Process an unknown command through the enhanced shell hook system with error context analysis. This command is typically called automatically by the shell's command_not_found_handler when you type a command that doesn't exist. It will:
+.RS
+.IP \(bu 2
+Detect common typos and suggest corrections
+.IP \(bu 2
+Use AI to suggest similar or related commands with enhanced context
+.IP \(bu 2
+Analyze error context including current directory, recent commands, and user environment
+.IP \(bu 2
+Provide explanations for suggested commands
+.IP \(bu 2
+Offer to execute the suggestion with user confirmation
+.IP \(bu 2
+Support both reactive (after error) and proactive (before execution) modes
+.RE
+
+.RS
+Enhanced context options:
+.IP \(bu 2
+.B \-\-error\-context \fIMESSAGE\fR
+- Shell error message for better analysis
+.IP \(bu 2
+.B \-\-pwd \fIDIRECTORY\fR
+- Current working directory context
+.IP \(bu 2
+.B \-\-user \fIUSER\fR
+- User and hostname information
+.IP \(bu 2
+.B \-\-last\-command \fICOMMAND\fR
+- Previously executed command for context
+.IP \(bu 2
+.B \-\-recent\-similar \fICOMMAND\fR
+- Recent similar command from history
+.IP \(bu 2
+.B \-\-preexec\-mode
+- Enable proactive suggestion mode
+.RE
+
+.TP
+.B config [\fIKEY\fR] [\fIVALUE\fR]
+Manage configuration settings. When called without arguments, displays all current settings. With a key only, displays that setting's value. With both key and value, updates the setting.
+
+Common configuration keys:
+.RS
+.IP \(bu 2
+.B api_key
+- OpenAI API key
+.IP \(bu 2
+.B model
+- OpenAI model name
+.IP \(bu 2
+.B max_tokens
+- Maximum tokens per response
+.IP \(bu 2
+.B temperature
+- AI creativity level
+.IP \(bu 2
+.B hook_enabled
+- Enable/disable shell hooks
+.IP \(bu 2
+.B auto_execute
+- Auto-execute safe commands
+.IP \(bu 2
+.B confirmation_threshold
+- Safety confirmation threshold
+.RE
+
+.TP
+.B history [\fISUBCOMMAND\fR]
+Manage command history and session data.
+
+Subcommands:
+.RS
+.IP \(bu 2
+.B list
+- Show recent command history
+.IP \(bu 2
+.B clear
+- Clear all history
+.IP \(bu 2
+.B stats
+- Display usage statistics
+.IP \(bu 2
+.B export
+- Export history to file
+.RE
+
+.SH INTERACTIVE MODE
+When run without arguments, CommandGPT enters interactive REPL mode where you can:
+.IP \(bu 2
+Ask questions about shell commands
+.IP \(bu 2
+Request command suggestions for specific tasks
+.IP \(bu 2
+Get explanations of complex commands
+.IP \(bu 2
+Practice with safe command execution
+
+Special REPL commands:
+.IP \(bu 2
+.B .help
+- Show REPL help
+.IP \(bu 2
+.B .quit/.exit
+- Exit the session
+.IP \(bu 2
+.B .clear
+- Clear the screen
+.IP \(bu 2
+.B .history
+- Show session history
+.IP \(bu 2
+.B .config
+- Show current configuration
+
+.SH SHELL INTEGRATION
+CommandGPT can integrate with your shell to automatically suggest commands when you type something that doesn't exist. This requires adding a hook to your shell configuration.
+
+.SS Zsh Integration
+Add the following to your ~/.zshrc:
+
+.nf
+# CommandGPT Shell Hook for zsh
+command_not_found_handler() {
+    local cmd="$1"
+    shift || true
+    
+    # Prevent infinite loops
+    if [[ "$COMMANDGPT_HOOK_ACTIVE" == "true" ]]; then
+        echo "zsh: command not found: $cmd" >&2
+        return 127
+    fi
+    
+    # Check if hook is enabled
+    if [[ "$COMMANDGPT_HOOK_ENABLED" != "true" ]]; then
+        echo "zsh: command not found: $cmd" >&2
+        return 127
+    fi
+    
+    # Verify commandgpt exists
+    if ! command -v commandgpt >/dev/null 2>&1; then
+        echo "zsh: command not found: $cmd" >&2
+        return 127
+    fi
+    
+    # Set flag and call commandgpt
+    export COMMANDGPT_HOOK_ACTIVE=true
+    if commandgpt hook "$cmd" "$@" 2>/dev/null; then
+        local exit_code=$?
+        unset COMMANDGPT_HOOK_ACTIVE
+        return $exit_code
+    else
+        unset COMMANDGPT_HOOK_ACTIVE
+        echo "zsh: command not found: $cmd" >&2
+        return 127
+    fi
+}
+
+# Enable the hook
+export COMMANDGPT_HOOK_ENABLED=true
+.fi
+
+Control aliases:
+.IP \(bu 2
+.B commandgpt-hook-on
+- Enable enhanced shell hooks
+.IP \(bu 2
+.B commandgpt-hook-off
+- Disable shell hooks
+.IP \(bu 2
+.B commandgpt-hook-status
+- Show current hook status with enhancement info
+
+.SH CONFIGURATION
+CommandGPT stores configuration in TOML format at ~/.config/commandgpt/config.toml. The hook system uses a separate configuration file at ~/.config/commandgpt/hook.toml.
+
+.SS Main Configuration (config.toml)
+.nf
+[api]
+key = "your-openai-api-key"
+model = "gpt-3.5-turbo"
+max_tokens = 1000
+temperature = 0.7
+timeout_seconds = 30
+
+[behavior]
+auto_execute_safe = false
+confirmation_required = true
+save_history = true
+telemetry_enabled = false
+
+[display]
+colored_output = true
+show_explanations = true
+verbose_mode = false
+.fi
+
+.SS Hook Configuration (hook.toml)
+.nf
+enabled = true
+auto_execute_safe = false
+confirmation_threshold = 0.8
+max_suggestions = 3
+typo_threshold = 0.7
+include_explanations = true
+.fi
+
+.SH ENVIRONMENT VARIABLES
+.TP
+.B OPENAI_API_KEY
+OpenAI API key (overrides config file setting)
+.TP
+.B COMMANDGPT_CONFIG
+Path to custom configuration file
+.TP
+.B COMMANDGPT_HOOK_ENABLED
+Enable/disable shell hooks (true/false)
+.TP
+.B COMMANDGPT_HOOK_ACTIVE
+Internal flag to prevent hook loops (do not set manually)
+.TP
+.B COMMANDGPT_DEBUG
+Enable debug logging (true/false)
+.TP
+.B COMMANDGPT_CACHE_DIR
+Custom cache directory for temporary files
+
+.SH FILES
+.TP
+.I ~/.config/commandgpt/config.toml
+Main configuration file
+.TP
+.I ~/.config/commandgpt/hook.toml
+Shell hook configuration
+.TP
+.I ~/.config/commandgpt/history.db
+Command history database (sled format)
+.TP
+.I ~/.cache/commandgpt/
+Cache directory for temporary files and API responses
+.TP
+.I ~/.config/commandgpt/context/
+Directory for custom context files
+
+.SH EXAMPLES
+.TP
+Basic usage in interactive mode:
+.B commandgpt
+.TP
+Ask for help with a specific task:
+.B commandgpt "How do I find large files?"
+.TP
+Configure the OpenAI API key:
+.B commandgpt config api_key sk-your-key-here
+.TP
+View current configuration:
+.B commandgpt config
+.TP
+Enable verbose mode:
+.B commandgpt -v
+.TP
+Use a different model:
+.B commandgpt --model gpt-4
+.TP
+Check command history:
+.B commandgpt history list
+.TP
+Clear all history:
+.B commandgpt history clear
+
+.SS Shell Hook Examples
+When the shell hook is enabled, these scenarios will trigger CommandGPT:
+
+.TP
+Typo correction:
+.B $ gti status
+.br
+CommandGPT suggests: Did you mean 'git status'?
+
+.TP
+Unknown command assistance:
+.B $ findlarge
+.br
+CommandGPT suggests commands to find large files
+
+.TP
+Intent-based suggestions:
+.B $ compress-folder
+.br
+CommandGPT suggests: tar -czf folder.tar.gz folder/
+
+.SH SAFETY FEATURES
+CommandGPT includes several safety mechanisms:
+
+.IP \(bu 2
+.B Command Filtering
+- Blocks dangerous commands (rm -rf, format, etc.)
+.IP \(bu 2
+.B User Confirmation
+- Requires approval before executing suggested commands
+.IP \(bu 2
+.B Loop Prevention
+- Prevents infinite recursion in shell hooks
+.IP \(bu 2
+.B Sandboxed Execution
+- Safe testing environment for command validation
+.IP \(bu 2
+.B Audit Logging
+- Tracks all command suggestions and executions
+
+.SH TROUBLESHOOTING
+.SS Common Issues
+
+.TP
+.B API Key Issues
+If you see "API key not found" errors:
+.IP \(bu 2
+Set your API key: commandgpt config api_key YOUR_KEY
+.IP \(bu 2
+Or export OPENAI_API_KEY=YOUR_KEY
+.IP \(bu 2
+Verify key validity at https://platform.openai.com
+
+.TP
+.B Shell Hook Not Working
+If commands aren't being intercepted:
+.IP \(bu 2
+Check hook status: commandgpt-hook-status
+.IP \(bu 2
+Enable hooks: commandgpt-hook-on
+.IP \(bu 2
+Reload shell: source ~/.zshrc
+.IP \(bu 2
+Verify commandgpt is in PATH: which commandgpt
+
+.TP
+.B Permission Issues
+If you see permission errors:
+.IP \(bu 2
+Ensure ~/.config/commandgpt/ is writable
+.IP \(bu 2
+Check that commandgpt binary is executable
+.IP \(bu 2
+Verify file ownership: ls -la $(which commandgpt)
+
+.TP
+.B Network Issues
+If API calls fail:
+.IP \(bu 2
+Check internet connectivity
+.IP \(bu 2
+Verify firewall settings
+.IP \(bu 2
+Try increasing timeout: commandgpt config timeout_seconds 60
+
+.SH DEBUGGING
+Enable debug mode for troubleshooting:
+
+.B export COMMANDGPT_DEBUG=true
+.br
+.B commandgpt -v your-command
+
+Debug logs will show:
+.IP \(bu 2
+API request/response details
+.IP \(bu 2
+Configuration loading process
+.IP \(bu 2
+Hook execution flow
+.IP \(bu 2
+Safety check results
+
+.SH PRIVACY AND SECURITY
+CommandGPT processes commands locally when possible, but sends command text to OpenAI for AI suggestions. Be aware:
+
+.IP \(bu 2
+Commands containing sensitive data will be sent to OpenAI
+.IP \(bu 2
+API calls are logged by OpenAI according to their policy
+.IP \(bu 2
+Local history is stored in ~/.config/commandgpt/
+.IP \(bu 2
+Telemetry can be disabled in configuration
+
+To minimize data exposure:
+.IP \(bu 2
+Disable hooks for sensitive sessions: commandgpt-hook-off
+.IP \(bu 2
+Use environment variables for secrets instead of command arguments
+.IP \(bu 2
+Review and clear history regularly: commandgpt history clear
+
+.SH EXIT STATUS
+CommandGPT returns the following exit codes:
+.TP
+.B 0
+Success
+.TP
+.B 1
+General error
+.TP
+.B 2
+Configuration error
+.TP
+.B 3
+API error
+.TP
+.B 4
+Permission error
+.TP
+.B 127
+Command not found (from shell hook)
+
+.SH AUTHOR
+CommandGPT was created to bridge the gap between AI assistance and practical command line usage, making shell interaction more intuitive and educational.
+
+.SH REPORTING BUGS
+Report bugs and issues at: https://github.com/dMillerus/commandGPT/issues
+
+.SH SEE ALSO
+.BR bash (1),
+.BR zsh (1),
+.BR fish (1),
+.BR man (1),
+.BR history (1)
+
+Additional documentation and examples available at:
+https://github.com/dMillerus/commandGPT
+
+.SH VERSION
+This manual page documents CommandGPT version 1.0.0.

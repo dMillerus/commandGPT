@@ -6,6 +6,7 @@ pub mod context;
 pub mod error;
 pub mod executor;
 pub mod history;
+pub mod hook;
 pub mod openai;
 pub mod safety;
 pub mod telemetry;
@@ -17,3 +18,6 @@ pub use config::AppConfig;
 // Include history_old for backwards compatibility testing
 #[cfg(test)]
 pub mod history_old;
+
+#[cfg(test)]
+mod hook_tests;
