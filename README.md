@@ -16,7 +16,14 @@ A single-binary, Rust-based CLI that turns natural-language requests into vetted
 
 ## Documentation
 
-For complete documentation, see the manual page:
+For complete documentation, see:
+
+- **📚 [Documentation Index](DOCS_INDEX.md)** - Navigation guide to all docs
+- **🚀 [Quick Start Guide](QUICKSTART.md)** - Fast setup and basic usage  
+- **🪝 [Shell Hook Guide](SHELL_HOOK.md)** - Advanced shell integration
+- **🔧 [Technical Implementation](IMPLEMENTATION.md)** - Architecture and development details
+
+Or view the manual page:
 
 ```bash
 man commandgpt
@@ -106,49 +113,45 @@ commandgpt config delete-key
 commandgpt config show
 ```
 
-### Shell Hook (Auto-Fallback)
+### Shell Hook - Intelligent Auto-Fallback
 
-CommandGPT can automatically intercept unknown commands and suggest alternatives:
+CommandGPT includes an advanced shell hook system that provides AI assistance for all command failures:
 
 ```bash
-# Install shell hook
+# Install and enable shell hook
 commandgpt shell-hook install
-
-# Enable auto-fallback
 commandgpt shell-hook enable
-
-# Check status
-commandgpt shell-hook status
 ```
 
-Example usage with shell hook enabled:
+**Comprehensive Error Handling** - Not just "command not found":
+
+- ✅ Unknown commands and typos
+- ✅ Permission denied errors  
+- ✅ File/directory not found
+- ✅ Syntax errors and invalid flags
+- ✅ Network connectivity issues
+- ✅ Missing dependencies and packages
+
+Example usage:
+
 ```bash
 $ lss
-🤖 Command 'lss' not found. Asking CommandGPT for help...
-💡 Suggested command:
-  ls -la
-Execute this command? [y/N]: y
+🤖 Command 'lss' not found. Getting AI assistance...
+💡 Suggested command: ls -la
 
-$ find large files
-🤖 Command 'find large files' not found. Asking CommandGPT for help...
-💡 Suggested command:
-  find . -type f -size +100M -exec ls -lh {} +
-Execute this command? [y/N]: y
+$ curl invalid-domain.test
+🤖 Command failed (exit 6). Getting AI assistance...  
+💡 Suggested fix: curl -I google.com  # Test connectivity first
 ```
 
 **Safety Features:**
-- 🔒 Disabled by default for security
-- 🛡️ Filters out dangerous commands (`sudo`, `rm`, etc.)
-- ⏱️ 10-second timeout to prevent hanging
-- ✋ Always requires confirmation before execution
 
-**Management Commands:**
-```bash
-commandgpt shell-hook enable     # Enable hook
-commandgpt shell-hook disable    # Disable hook  
-commandgpt shell-hook uninstall  # Remove hook completely
-commandgpt shell-hook generate   # Show hook script
-```
+- 🔒 Disabled by default for security
+- 🛡️ Multi-layer safety validation
+- ⏱️ 30-second timeout protection
+- ✋ Always requires user confirmation
+
+For complete shell hook documentation, see [SHELL_HOOK.md](SHELL_HOOK.md).
 
 ### Command Line Options
 

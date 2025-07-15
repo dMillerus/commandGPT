@@ -199,6 +199,76 @@ The architecture is designed to support planned extensions:
 - Advanced telemetry dashboard
 - Model fine-tuning capabilities
 
+## 🔧 Enhanced Error Handling System
+
+### Comprehensive Command Exit Monitoring
+
+The CommandGPT shell hook has been enhanced to provide AI-powered assistance for **all command errors**, not just "command not found" scenarios:
+
+#### Error Type Classification
+
+The system intelligently categorizes errors into 11+ specific types:
+
+1. **Command Not Found** (exit 127) - Typo detection, package installation suggestions
+2. **Permission Denied** (exit 126) - sudo usage, file permission fixes
+3. **File/Directory Not Found** - Path corrections, file creation guidance
+4. **Syntax Errors** (exit 2) - Command usage examples, flag corrections
+5. **Network Errors** (exit 6) - DNS resolution help, proxy configuration
+6. **Disk Space Issues** - Cleanup suggestions, space analysis
+7. **Configuration Errors** - Config validation, setting corrections
+8. **Dependency Missing** - Installation commands, alternatives
+9. **Service/Daemon Issues** - Service restart, status checking
+10. **Authentication Failed** - Token refresh, credential reset
+11. **Timeout Errors** - Retry suggestions, optimization tips
+
+#### Enhanced Context Collection
+
+```bash
+# Error Context
+--exit-code 2                           # Command exit code
+--error-type "syntax_error"             # Classified error type
+--stderr-output "invalid option: -xyz"  # Error output
+--stdout-output "..."                   # Standard output (if any)
+
+# Environment Context  
+--pwd "/current/directory"              # Working directory
+--user "username@hostname"              # User context
+--command-duration 1500                 # Execution time (ms)
+--environment-vars "PATH=...; SHELL=..."# Relevant env vars
+
+# Historical Context
+--last-command "git status"             # Previous command
+--recent-similar "git commit"           # Recent similar commands
+```
+
+#### Multi-Layer Hook Integration
+
+The enhanced hook system uses multiple integration points:
+
+**1. `command_not_found_handler` (Traditional)**
+```bash
+# Handles unknown commands (exit 127)
+command_not_found_handler() {
+    # Enhanced with comprehensive context gathering
+}
+```
+
+**2. `preexec` Hook (Proactive)**
+```bash  
+# Runs before command execution
+preexec_commandgpt_hook() {
+    # Offers proactive suggestions for potentially problematic commands
+}
+```
+
+**3. `precmd` Hook (Reactive)**
+```bash
+# Runs after command completion
+precmd_commandgpt_hook() {
+    # Analyzes exit codes and provides assistance for failures
+}
+```
+
 ## 🧪 Testing
 
 The project includes comprehensive tests:
