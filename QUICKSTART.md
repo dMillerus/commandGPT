@@ -17,8 +17,8 @@ Welcome to CommandGPT! This guide will get you up and running in just a few minu
 ### Option 1: Build from Source
 ```bash
 # Clone the repository
-git clone https://github.com/yourorg/commandgpt
-cd commandgpt
+git clone https://github.com/dMillerus/commandGPT
+cd commandGPT
 
 # Build optimized version
 make release
@@ -29,7 +29,7 @@ make install
 
 ### Option 2: Direct Cargo Install
 ```bash
-cargo install --git https://github.com/yourorg/commandgpt
+cargo install --git https://github.com/dMillerus/commandGPT
 ```
 
 ## Initial Setup
@@ -136,15 +136,33 @@ chmod +x /usr/local/bin/commandgpt
 ```
 
 ### Debug Mode
+
 ```bash
 # Enable debug logging
 commandgpt --debug
 ```
 
+### Development Builds
+
+```bash
+# For development: clean system and rebuild from source
+./dev-clean.sh
+
+# Keep your configuration while rebuilding
+./dev-clean.sh --keep-config
+
+# Clean old installations without rebuilding
+./dev-clean.sh --skip-build
+```
+
+The `dev-clean.sh` script ensures you're testing the latest version by removing old installations and rebuilding from source.
+
 ## Next Steps
 
 - Explore the full documentation in [README.md](README.md)
 - Check out [IMPLEMENTATION.md](IMPLEMENTATION.md) for technical details
+- For development work, see the Development section in [README.md](README.md)
+- Use `./dev-clean.sh` for clean development builds
 - Customize your context files for better AI responses
 - Try the various command-line options and flags
 
