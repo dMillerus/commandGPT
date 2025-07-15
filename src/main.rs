@@ -66,9 +66,18 @@ enum Commands {
         /// Additional arguments passed to the command
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
+        /// Exit code of the failed command
+        #[arg(long)]
+        exit_code: Option<i32>,
         /// Error message from the shell
         #[arg(long)]
         error_context: Option<String>,
+        /// Standard error output from the command
+        #[arg(long)]
+        stderr_output: Option<String>,
+        /// Standard output from the command
+        #[arg(long)]
+        stdout_output: Option<String>,
         /// Current working directory
         #[arg(long)]
         pwd: Option<String>,
@@ -81,9 +90,18 @@ enum Commands {
         /// Recent similar command from history
         #[arg(long)]
         recent_similar: Option<String>,
+        /// Command execution duration in milliseconds
+        #[arg(long)]
+        command_duration: Option<u64>,
+        /// Environment variables context
+        #[arg(long)]
+        environment_vars: Option<String>,
         /// Proactive mode (before execution)
         #[arg(long)]
         preexec_mode: bool,
+        /// Type of error (command_not_found, permission_denied, etc.)
+        #[arg(long)]
+        error_type: Option<String>,
     },
     /// Shell hook management
     ShellHook {
@@ -116,6 +134,8 @@ enum HookAction {
     Disable,
     /// Generate hook script
     Generate,
+    /// Test comprehensive error handling
+    Test,
 }
 
 #[tokio::main]
@@ -165,22 +185,34 @@ async fn main() -> Result<()> {
         Some(Commands::Hook { 
             command, 
             args, 
+            exit_code,
             error_context, 
+            stderr_output,
+            stdout_output,
             pwd, 
             user, 
             last_command, 
             recent_similar, 
-            preexec_mode 
+            command_duration,
+            environment_vars,
+            preexec_mode,
+            error_type,
         }) => {
             handle_hook_command_enhanced(&config, hook::HookArgs {
                 command: command.clone(),
                 args: args.clone(),
+                exit_code: *exit_code,
                 error_context: error_context.clone(),
+                stderr_output: stderr_output.clone(),
+                stdout_output: stdout_output.clone(),
                 pwd: pwd.clone(),
                 user: user.clone(),
                 last_command: last_command.clone(),
                 recent_similar: recent_similar.clone(),
+                command_duration: *command_duration,
+                environment_vars: environment_vars.clone(),
                 preexec_mode: *preexec_mode,
+                error_type: error_type.clone(),
             }).await
         }
         Some(Commands::ShellHook { action }) => {
@@ -462,14 +494,20 @@ async fn handle_hook_command_enhanced(config: &config::AppConfig, hook_args: hoo
     // Use enabled hook configuration for hook processing
     let hook_config = hook::HookConfig::enabled();
     
-    // Build error context from parsed arguments
+    // Build comprehensive error context from parsed arguments
     let error_context = hook::ErrorContext {
         error_message: hook_args.error_context,
+        exit_code: hook_args.exit_code,
+        stderr_output: hook_args.stderr_output,
+        stdout_output: hook_args.stdout_output,
         current_directory: hook_args.pwd,
         user_context: hook_args.user,
         last_command: hook_args.last_command,
         recent_similar: hook_args.recent_similar,
+        command_duration: hook_args.command_duration,
+        environment_vars: hook_args.environment_vars,
         preexec_mode: hook_args.preexec_mode,
+        error_type: hook_args.error_type,
     };
     
     // Create shell hook processor
@@ -479,8 +517,16 @@ async fn handle_hook_command_enhanced(config: &config::AppConfig, hook_args: hoo
     let mut full_args = vec![hook_args.command];
     full_args.extend(hook_args.args);
     
-    // Process with enhanced context
-    if let Err(e) = shell_hook.process_unknown_command_with_context(&full_args, error_context).await {
+    // Determine which processing method to use based on context
+    let result = if error_context.exit_code.is_some() || error_context.stderr_output.is_some() {
+        // Use comprehensive exit processing for commands with exit codes or stderr
+        shell_hook.process_command_exit(&full_args, error_context).await
+    } else {
+        // Fall back to enhanced context processing for command not found scenarios
+        shell_hook.process_unknown_command_with_context(&full_args, error_context).await
+    };
+    
+    if let Err(e) = result {
         log::debug!("Hook processing error: {}", e);
     }
     
@@ -506,6 +552,9 @@ async fn handle_shell_hook_command(action: &HookAction, config: &config::AppConf
         }
         HookAction::Generate => {
             generate_hook_script_output().await
+        }
+        HookAction::Test => {
+            test_comprehensive_hook(config).await
         }
     }
 }
@@ -729,6 +778,153 @@ async fn save_hook_config(config: &hook::HookConfig) -> Result<()> {
         message: format!("Failed to write hook config: {}", e),
         source: Some(Box::new(e)),
     })?;
+    
+    Ok(())
+}
+
+async fn test_comprehensive_hook(config: &config::AppConfig) -> Result<()> {
+    use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+    
+    let mut stdout = StandardStream::stdout(ColorChoice::Auto);
+    
+    stdout.set_color(ColorSpec::new().set_fg(Some(Color::Blue)).set_bold(true))?;
+    println!("🧪 Testing CommandGPT Comprehensive Hook System");
+    stdout.reset()?;
+    println!();
+    
+    // Test different error scenarios
+    let test_scenarios = vec![
+        (
+            "unknown_command_test",
+            vec![],
+            Some(127),
+            Some("command not found: unknown_command_test".to_string()),
+            Some("command_not_found".to_string()),
+            "Testing unknown command handling"
+        ),
+        (
+            "ls",
+            vec!["/nonexistent/path".to_string()],
+            Some(2),
+            Some("ls: cannot access '/nonexistent/path': No such file or directory".to_string()),
+            Some("file_not_found".to_string()),
+            "Testing file not found error"
+        ),
+        (
+            "cat",
+            vec!["/etc/shadow".to_string()],
+            Some(1),
+            Some("cat: /etc/shadow: Permission denied".to_string()),
+            Some("permission_denied".to_string()),
+            "Testing permission denied error"
+        ),
+        (
+            "git",
+            vec!["invalid-subcommand".to_string()],
+            Some(1),
+            Some("git: 'invalid-subcommand' is not a git command".to_string()),
+            Some("syntax_error".to_string()),
+            "Testing invalid subcommand error"
+        ),
+        (
+            "curl",
+            vec!["http://nonexistent.invalid".to_string()],
+            Some(6),
+            Some("curl: (6) Could not resolve host: nonexistent.invalid".to_string()),
+            Some("network_error".to_string()),
+            "Testing network error"
+        ),
+    ];
+    
+    println!("Running {} test scenarios...\n", test_scenarios.len());
+    
+    for (i, (command, args, exit_code, stderr, error_type, description)) in test_scenarios.iter().enumerate() {
+        stdout.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
+        println!("Test {}: {}", i + 1, description);
+        stdout.reset()?;
+        
+        // Create comprehensive error context
+        let error_context = hook::ErrorContext {
+            error_message: stderr.clone(),
+            exit_code: *exit_code,
+            stderr_output: stderr.clone(),
+            stdout_output: None,
+            current_directory: Some(std::env::current_dir()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()),
+            user_context: Some(format!("{}@{}", 
+                std::env::var("USER").unwrap_or_else(|_| "testuser".to_string()),
+                std::env::var("HOSTNAME").unwrap_or_else(|_| "testhost".to_string())
+            )),
+            last_command: if i > 0 { 
+                Some(format!("{} {}", test_scenarios[i-1].0, test_scenarios[i-1].1.join(" "))) 
+            } else { 
+                None 
+            },
+            recent_similar: None,
+            command_duration: Some(150 + (i as u64 * 50)), // Simulate different durations
+            environment_vars: Some("PATH=/usr/bin:/bin;SHELL=/bin/zsh".to_string()),
+            preexec_mode: false,
+            error_type: error_type.clone(),
+        };
+        
+        // Create hook processor
+        let hook_config = hook::HookConfig::enabled();
+        let shell_hook = hook::ShellHook::new(config, hook_config);
+        
+        // Build command arguments
+        let mut full_args = vec![command.to_string()];
+        full_args.extend(args.clone());
+        
+        println!("  Command: {} {}", command, args.join(" "));
+        if let Some(code) = exit_code {
+            println!("  Exit Code: {}", code);
+        }
+        if let Some(err) = stderr {
+            println!("  Error: {}", err);
+        }
+        
+        // Test the hook processing
+        stdout.set_color(ColorSpec::new().set_fg(Some(Color::Yellow)))?;
+        println!("  🤖 Triggering AI analysis...");
+        stdout.reset()?;
+        
+        match shell_hook.process_command_exit(&full_args, error_context).await {
+            Ok(()) => {
+                stdout.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
+                println!("  ✅ Test completed successfully");
+                stdout.reset()?;
+            }
+            Err(e) => {
+                stdout.set_color(ColorSpec::new().set_fg(Some(Color::Red)))?;
+                println!("  ❌ Test failed: {}", e);
+                stdout.reset()?;
+            }
+        }
+        
+        println!();
+        
+        // Small delay between tests for better UX
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    
+    stdout.set_color(ColorSpec::new().set_fg(Some(Color::Green)).set_bold(true))?;
+    println!("🎉 Comprehensive hook testing completed!");
+    stdout.reset()?;
+    
+    println!("\n📋 Test Summary:");
+    println!("  • {} scenarios tested", test_scenarios.len());
+    println!("  • Command not found handling");
+    println!("  • File system errors");
+    println!("  • Permission errors");
+    println!("  • Syntax/usage errors");
+    println!("  • Network connectivity issues");
+    
+    println!("\n💡 Next Steps:");
+    println!("  1. Enable the hook: commandgpt shell-hook enable");
+    println!("  2. Restart your terminal or: source ~/.zshrc");
+    println!("  3. Try commands that fail to see AI assistance in action");
     
     Ok(())
 }
